@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+screenshots/
+bot_debug.log
+.agents/
+.wdm/
+.idea/
+.vscode/
