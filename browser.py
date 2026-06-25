@@ -161,7 +161,7 @@ class RegistrationBrowser:
         return any(kw in err_msg for kw in unreachable_keywords)
 
     def login(self, username: Optional[str] = None, password: Optional[str] = None) -> bool:
-        """Logs into the portal with exponential backoff on server errors."""
+        """Logs into the portal (single attempt). Returns True if successful, raises on failure."""
         if username:
             self.username = username
         if password:
@@ -174,61 +174,55 @@ class RegistrationBrowser:
             logger.error("Login aborted: Username or Password not provided in browser session.")
             return False
             
-        wait_time = 2.0
-        max_wait = 30.0
-        
-        while True:
-            try:
-                if not self.is_session_alive():
-                    self.initialize_driver()
-                
-                logger.info(f"Navigating to login page: {URL_LOGIN}")
-                self.driver.get(URL_LOGIN)
-                
-                if self.is_chrome_error_page():
-                    raise SiteUnreachableException("Site could not be reached (Chrome error page detected)")
-                
-                if self.check_gateway_error():
-                    raise Exception("Gateway Error on login page")
- 
-                logger.info("Entering login credentials...")
-                user_field = self.wait.until(EC.visibility_of_element_located((By.NAME, "register_no")))
-                user_field.clear()
-                user_field.send_keys(user_to_use)
-                
-                pass_field = self.driver.find_element(By.NAME, "password")
-                pass_field.clear()
-                pass_field.send_keys(pass_to_use)
-                
-                logger.info("Clicking Submit button...")
-                self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-                
-                # Wait for login URL to change (login redirects to dashboard)
-                self.wait.until(EC.url_changes(URL_LOGIN))
-                
-                current_url = self.driver.current_url
-                logger.success(f"Login successful! Current URL: {current_url}")
-                self.save_debug_screenshot("login_success")
-                return True
+        try:
+            if not self.is_session_alive():
+                self.initialize_driver()
+            
+            logger.info(f"Navigating to login page: {URL_LOGIN}")
+            self.driver.get(URL_LOGIN)
+            
+            if self.is_chrome_error_page():
+                raise SiteUnreachableException("Site could not be reached (Chrome error page detected)")
+            
+            if self.check_gateway_error():
+                raise Exception("Gateway Error on login page")
 
-            except Exception as e:
-                if isinstance(e, SiteUnreachableException) or self.is_site_unreachable_error(e):
-                    self.last_error_type = "unreachable"
-                else:
-                    self.last_error_type = "other"
-                logger.error(f"Login attempt failed: {e}. Retrying in {wait_time}s...")
-                self.save_debug_screenshot("login_failure")
-                if self.driver:
-                    try:
-                        self.driver.delete_all_cookies()
-                    except Exception:
-                        pass
-                    # If browser is crashed, close it so a clean one opens on next iteration
-                    if "chrome not reachable" in str(e).lower() or "session" in str(e).lower():
-                        self.close_driver()
-                
-                time.sleep(wait_time)
-                wait_time = min(wait_time * 1.5, max_wait)
+            logger.info("Entering login credentials...")
+            user_field = self.wait.until(EC.visibility_of_element_located((By.NAME, "register_no")))
+            user_field.clear()
+            user_field.send_keys(user_to_use)
+            
+            pass_field = self.driver.find_element(By.NAME, "password")
+            pass_field.clear()
+            pass_field.send_keys(pass_to_use)
+            
+            logger.info("Clicking Submit button...")
+            self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+            
+            # Wait for login URL to change (login redirects to dashboard)
+            self.wait.until(EC.url_changes(URL_LOGIN))
+            
+            current_url = self.driver.current_url
+            logger.success(f"Login successful! Current URL: {current_url}")
+            self.save_debug_screenshot("login_success")
+            return True
+
+        except Exception as e:
+            if isinstance(e, SiteUnreachableException) or self.is_site_unreachable_error(e):
+                self.last_error_type = "unreachable"
+            else:
+                self.last_error_type = "other"
+            logger.error(f"Login attempt failed: {e}")
+            self.save_debug_screenshot("login_failure")
+            if self.driver:
+                try:
+                    self.driver.delete_all_cookies()
+                except Exception:
+                    pass
+                # If browser is crashed, close it so a clean one opens on next iteration
+                if "chrome not reachable" in str(e).lower() or "session" in str(e).lower():
+                    self.close_driver()
+            raise e
 
     def check_registration_live(self) -> Optional[List[Dict[str, Any]]]:
         """
@@ -241,9 +235,17 @@ class RegistrationBrowser:
         try:
             if not self.is_session_alive():
                 logger.warning("Browser session was lost before checking registration. Re-logging in...")
-                if not self.login():
+                try:
+                    if not self.login():
+                        self.last_check_had_error = True
+                        self.last_error_type = "unreachable"
+                        return None
+                except Exception as e:
                     self.last_check_had_error = True
-                    self.last_error_type = "unreachable"
+                    if isinstance(e, SiteUnreachableException) or self.is_site_unreachable_error(e):
+                        self.last_error_type = "unreachable"
+                    else:
+                        self.last_error_type = "other"
                     return None
 
             logger.info(f"Checking registration page: {URL_REGISTRATION}")
@@ -265,9 +267,12 @@ class RegistrationBrowser:
             # If redirected to login, login session expired
             if "login" in self.driver.current_url:
                 logger.warning("Session expired, redirected to login page. Re-logging in...")
-                if self.login():
-                    # Retry checking registration page
-                    return self.check_registration_live()
+                try:
+                    if self.login():
+                        # Retry checking registration page
+                        return self.check_registration_live()
+                except Exception:
+                    pass
                 self.last_check_had_error = True
                 self.last_error_type = "unreachable"
                 return None

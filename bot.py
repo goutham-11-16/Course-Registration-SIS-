@@ -324,13 +324,36 @@ async def monitor_loop(chat_id: int, user: str, pwd: str, context: ContextTypes.
     attempt_count = 0
     
     try:
-        # Step 1: Login
-        await log_status_event(chat_id, context, "Attempting portal login...")
-        login_success = await asyncio.to_thread(browser.login, user, pwd)
-        if not login_success:
-            await log_status_event(chat_id, context, "❌ Login failed. Retrying in background...")
-        else:
-            await log_status_event(chat_id, context, "🟢 Login successful!")
+        # Step 1: Login with retries
+        login_success = False
+        login_attempts = 0
+        login_wait_time = 2.0
+        max_login_wait = 30.0
+        
+        while not login_success:
+            login_attempts += 1
+            await log_status_event(chat_id, context, f"Attempting portal login (Attempt {login_attempts})...")
+            try:
+                login_success = await asyncio.to_thread(browser.login, user, pwd)
+                if login_success:
+                    await log_status_event(chat_id, context, "🟢 Login successful!")
+                else:
+                    await log_status_event(chat_id, context, "❌ Login aborted: missing credentials.")
+                    return
+            except Exception as e:
+                err_desc = "Login Error"
+                if browser.last_error_type == "unreachable":
+                    err_desc = "Site Unreachable / Timeout"
+                elif "gateway" in str(e).lower():
+                    err_desc = "502/504 Gateway Error"
+                
+                await log_status_event(
+                    chat_id, 
+                    context, 
+                    f"❌ Login failed: {err_desc}. Retrying in {int(login_wait_time)}s..."
+                )
+                await asyncio.sleep(login_wait_time)
+                login_wait_time = min(login_wait_time * 1.5, max_login_wait)
             
         # Step 2: Poll registration page
         while True:
