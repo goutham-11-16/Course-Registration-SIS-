@@ -33,6 +33,8 @@ HEADLESS = os.getenv("HEADLESS", "False").lower() in ("true", "1", "yes")
 
 URL_LOGIN = os.getenv("URL_LOGIN", "https://sis.kalasalingam.ac.in/login")
 URL_REGISTRATION = os.getenv("URL_REGISTRATION", "https://sis.kalasalingam.ac.in/registration")
+PUBLIC_URL = os.getenv("PUBLIC_URL")
+
 
 # Credentials Encryption/Decryption Helpers
 # We use the Telegram Bot Token as a key component to derive a 256-bit AES key.

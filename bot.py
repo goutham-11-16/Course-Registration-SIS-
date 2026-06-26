@@ -2,7 +2,7 @@ import asyncio
 import os
 import datetime
 from typing import Dict, Any, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -13,7 +13,7 @@ from telegram.ext import (
     ConversationHandler
 )
 from browser import RegistrationBrowser
-from config import logger, TELEGRAM_BOT_TOKEN, PORTAL_USERNAME, PORTAL_PASSWORD
+from config import logger, TELEGRAM_BOT_TOKEN, PORTAL_USERNAME, PORTAL_PASSWORD, PUBLIC_URL
 
 # Conversation states for Credentials setup
 AWAITING_USERNAME, AWAITING_PASSWORD = range(2)
@@ -199,6 +199,12 @@ async def send_dashboard(chat_id: int, context: ContextTypes.DEFAULT_TYPE, query
     else:
         buttons.append([
             InlineKeyboardButton("🚀 Start Monitoring", callback_data="dashboard:toggle_monitor")
+        ])
+        
+    # Show WebApp remote control button if browser is active and PUBLIC_URL is configured
+    if PUBLIC_URL and session["browser"].is_session_alive():
+        buttons.append([
+            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
         ])
         
     buttons.append([
@@ -469,6 +475,11 @@ async def send_main_menu(chat_id: int, context: ContextTypes.DEFAULT_TYPE, query
         InlineKeyboardButton("❌ Cancel", callback_data="menu:cancel")
     ])
     
+    if PUBLIC_URL:
+        buttons.append([
+            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
+        ])
+        
     markup = InlineKeyboardMarkup(buttons)
     
     if query:
