@@ -115,13 +115,11 @@ async def remote_control(chat_id: int):
             overflow: hidden;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             position: relative;
-            aspect-ratio: 16/10;
         }}
 
         .screen-img {{
             width: 100%;
-            height: 100%;
-            object-fit: contain;
+            height: auto;
             cursor: crosshair;
             display: block;
         }}
@@ -275,6 +273,8 @@ async def remote_control(chat_id: int):
                 <button class="btn btn-secondary" onclick="sendKey('down')">▼ Down</button>
                 <button class="btn btn-secondary" onclick="sendKey('left')">◀ Left</button>
                 <button class="btn btn-secondary" onclick="sendKey('right')">▶ Right</button>
+                <button class="btn btn-secondary" onclick="scrollPage('up')">📜 Scroll Up</button>
+                <button class="btn btn-secondary" onclick="scrollPage('down')">📜 Scroll Down</button>
                 <button class="btn btn-secondary" style="grid-column: span 2;" onclick="refreshScreen()">🔄 Refresh Feed</button>
             </div>
         </div>
@@ -363,6 +363,19 @@ async def remote_control(chat_id: int):
                     hideLoader();
                 }});
         }}
+
+        function scrollPage(dir) {{
+            showLoader();
+            fetch(`/remote/scroll/${{chatId}}?dir=${{dir}}`)
+                .then(r => r.json())
+                .then(data => {{
+                    refreshScreen();
+                }})
+                .catch(err => {{
+                    console.error(err);
+                    hideLoader();
+                }});
+        }}
     </script>
 </body>
 </html>"""
@@ -401,18 +414,53 @@ async def remote_click(chat_id: int, x: float, y: float):
         click_x = int(width * x)
         click_y = int(height * y)
         
-        logger.info(f"Remote click at ({click_x}, {click_y}) on window size ({width}x{height})")
+        logger.info(f"Remote click request at relative ({x}, {y}) -> absolute ({click_x}, {click_y}) on window size ({width}x{height})")
         
-        driver.execute_script("""
-            var el = document.elementFromPoint(arguments[0], arguments[1]);
-            if (el) {
-                el.click();
-                el.focus();
-            }
+        from selenium.webdriver.common.action_chains import ActionChains
+        
+        # Find the element at the viewport coordinates using Javascript elementFromPoint
+        element = driver.execute_script("""
+            return document.elementFromPoint(arguments[0], arguments[1]);
         """, click_x, click_y)
+        
+        if element:
+            logger.info(f"Found element at coordinates: tag={element.tag_name}, id={element.get_attribute('id')}, class={element.get_attribute('class')}")
+            # Try native ActionChains click (moves mouse to element first to trigger hover, then clicks)
+            try:
+                ActionChains(driver).move_to_element(element).click().perform()
+                logger.info("Successfully executed ActionChains click on element.")
+            except Exception as ac_err:
+                logger.warning(f"ActionChains click failed: {ac_err}. Falling back to JS click.")
+                driver.execute_script("arguments[0].click();", element)
+                driver.execute_script("arguments[0].focus();", element)
+        else:
+            logger.warning("No element found at the clicked coordinates via elementFromPoint.")
+            # Fallback to coordinate-based ActionChains click relative to the html element
+            from selenium.webdriver.common.by import By
+            html_el = driver.find_element(By.TAG_NAME, "html")
+            ActionChains(driver).move_to_element_with_offset(html_el, click_x, click_y).click().perform()
+            logger.info("Executed fallback coordinate-based ActionChains click.")
+            
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Remote click failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/remote/scroll/{chat_id}")
+async def remote_scroll(chat_id: int, dir: str):
+    session = user_sessions.get(chat_id)
+    if not session or not session.get("browser"):
+        return {"status": "error", "message": "No active session."}
+    
+    browser = session["browser"]
+    driver = browser.driver
+    try:
+        amount = 400 if dir == "down" else -400
+        driver.execute_script(f"window.scrollBy(0, {amount});")
+        logger.info(f"Scrolled window by {amount}px")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Remote scroll failed: {e}")
         return {"status": "error", "message": str(e)}
 
 @app.get("/remote/type/{chat_id}")
