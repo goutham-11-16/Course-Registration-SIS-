@@ -9,3 +9,5 @@ bot_debug.log
 .wdm/
 .idea/
 .vscode/
+group.py
+
