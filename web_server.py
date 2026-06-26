@@ -286,29 +286,29 @@ async def remote_control(chat_id: int):
         const loader = document.getElementById('loader');
         const textInput = document.getElementById('text-input');
 
-        function showLoader() {
+        function showLoader() {{
             loader.classList.add('active');
-        }
+        }}
 
-        function hideLoader() {
+        function hideLoader() {{
             loader.classList.remove('active');
-        }
+        }}
 
-        function refreshScreen() {
+        function refreshScreen() {{
             showLoader();
             const timestamp = new Date().getTime();
             screenImg.src = `/remote/screenshot/${{chatId}}?t=${{timestamp}}`;
-        }
+        }}
 
-        screenImg.onload = function() {
+        screenImg.onload = function() {{
             hideLoader();
-        };
+        }};
 
-        screenImg.onerror = function() {
+        screenImg.onerror = function() {{
             hideLoader();
-        };
+        }};
 
-        screenImg.addEventListener('click', function(e) {
+        screenImg.addEventListener('click', function(e) {{
             showLoader();
             const rect = screenImg.getBoundingClientRect();
             
@@ -324,7 +324,7 @@ async def remote_control(chat_id: int):
                     console.error(err);
                     hideLoader();
                 }});
-        });
+        }});
 
         function sendText() {{
             const val = textInput.value;
