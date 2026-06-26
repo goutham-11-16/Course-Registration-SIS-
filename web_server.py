@@ -1,10 +1,28 @@
 import os
+import threading
+from collections import defaultdict
+from io import BytesIO
+from PIL import Image
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 from config import logger
 from bot import user_sessions
 
 app = FastAPI(title="KARE Remote Control Web Server")
+
+# A dictionary of locks to serialize Selenium access per chat_id
+session_locks = defaultdict(threading.Lock)
+
+def capture_compressed_screenshot(browser) -> bytes:
+    """Captures a screenshot and compresses it as a JPEG to minimize bandwidth and latency."""
+    png_data = browser.driver.get_screenshot_as_png()
+    img = Image.open(BytesIO(png_data))
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+    out_buf = BytesIO()
+    # quality=60 is a sweet spot: small size, clean text legibility
+    img.save(out_buf, format="JPEG", quality=60)
+    return out_buf.getvalue()
 
 @app.get("/remote/control/{chat_id}", response_class=HTMLResponse)
 async def remote_control(chat_id: int):
@@ -78,6 +96,7 @@ async def remote_control(chat_id: int):
             display: flex;
             align-items: center;
             gap: 5px;
+            transition: all 0.3s ease;
         }}
 
         .status-badge::before {{
@@ -85,7 +104,7 @@ async def remote_control(chat_id: int):
             display: inline-block;
             width: 6px;
             height: 6px;
-            background-color: #10b981;
+            background-color: currentColor;
             border-radius: 50%;
             animation: pulse 1.5s infinite;
         }}
@@ -122,6 +141,12 @@ async def remote_control(chat_id: int):
             height: auto;
             cursor: crosshair;
             display: block;
+            transition: opacity 0.2s, filter 0.2s;
+        }}
+
+        .screen-img.loading {{
+            opacity: 0.7;
+            filter: grayscale(20%);
         }}
 
         .controls-card {{
@@ -207,35 +232,16 @@ async def remote_control(chat_id: int):
             }}
         }}
 
-        .loader-overlay {{
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(11, 15, 25, 0.7);
-            backdrop-filter: blur(3px);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s;
-            z-index: 10;
-        }}
-
-        .loader-overlay.active {{
-            opacity: 1;
-            pointer-events: auto;
-        }}
-
-        .spinner {{
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(255, 255, 255, 0.1);
-            border-top-color: var(--accent-color);
+        .spinner-small {{
+            width: 10px;
+            height: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: currentColor;
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 5px;
         }}
 
         @keyframes spin {{
@@ -247,14 +253,11 @@ async def remote_control(chat_id: int):
 
     <header>
         <div class="title">KARE Live Remote</div>
-        <div class="status-badge">Live Feed</div>
+        <div class="status-badge" id="status-badge">Live Feed</div>
     </header>
 
     <div class="container">
         <div class="screen-card">
-            <div class="loader-overlay" id="loader">
-                <div class="spinner"></div>
-            </div>
             <img class="screen-img" id="screen" src="/remote/screenshot/{chat_id}" alt="Browser Screenshot" />
         </div>
 
@@ -283,23 +286,31 @@ async def remote_control(chat_id: int):
     <script>
         const chatId = "{chat_id}";
         const screenImg = document.getElementById('screen');
-        const loader = document.getElementById('loader');
+        const statusBadge = document.getElementById('status-badge');
         const textInput = document.getElementById('text-input');
 
         // Auto-refresh screenshot every 3 seconds to keep the live feed updated automatically
         setInterval(function() {{
-            if (!loader.classList.contains('active')) {{
+            if (!screenImg.classList.contains('loading')) {{
                 const timestamp = new Date().getTime();
                 screenImg.src = `/remote/screenshot/${{chatId}}?t=${{timestamp}}`;
             }}
         }}, 3000);
 
         function showLoader() {{
-            loader.classList.add('active');
+            screenImg.classList.add('loading');
+            statusBadge.innerHTML = 'Loading <span class="spinner-small"></span>';
+            statusBadge.style.color = '#3b82f6';
+            statusBadge.style.borderColor = 'rgba(59, 130, 246, 0.2)';
+            statusBadge.style.background = 'rgba(59, 130, 246, 0.1)';
         }}
 
         function hideLoader() {{
-            loader.classList.remove('active');
+            screenImg.classList.remove('loading');
+            statusBadge.innerHTML = 'Live Feed';
+            statusBadge.style.color = '#10b981';
+            statusBadge.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+            statusBadge.style.background = 'rgba(16, 185, 129, 0.1)';
         }}
 
         function refreshScreen() {{
@@ -382,134 +393,141 @@ async def remote_control(chat_id: int):
     return HTMLResponse(content=html_content)
 
 @app.get("/remote/screenshot/{chat_id}")
-async def remote_screenshot(chat_id: int):
-    session = user_sessions.get(chat_id)
-    if not session or not session.get("browser"):
-        return Response(status_code=404, content="No active session found.")
-    
-    browser = session["browser"]
-    if not browser.is_session_alive():
-        return Response(status_code=400, content="Browser session is inactive.")
-    
-    try:
-        png_data = browser.driver.get_screenshot_as_png()
-        return Response(content=png_data, media_type="image/png")
-    except Exception as e:
-        logger.error(f"Failed to capture remote screenshot: {e}")
-        return Response(status_code=500, content=f"Failed: {e}")
+def remote_screenshot(chat_id: int):
+    lock = session_locks[chat_id]
+    with lock:
+        session = user_sessions.get(chat_id)
+        if not session or not session.get("browser"):
+            return Response(status_code=404, content="No active session found.")
+        
+        browser = session["browser"]
+        if not browser.is_session_alive():
+            return Response(status_code=400, content="Browser session is inactive.")
+        
+        try:
+            jpeg_data = capture_compressed_screenshot(browser)
+            return Response(content=jpeg_data, media_type="image/jpeg")
+        except Exception as e:
+            logger.error(f"Failed to capture remote screenshot: {e}")
+            return Response(status_code=500, content=f"Failed: {e}")
 
 @app.get("/remote/click/{chat_id}")
-async def remote_click(chat_id: int, x: float, y: float):
-    session = user_sessions.get(chat_id)
-    if not session or not session.get("browser"):
-        return {"status": "error", "message": "No active session."}
-    
-    browser = session["browser"]
-    driver = browser.driver
-    try:
-        size = driver.get_window_size()
-        width = size['width']
-        height = size['height']
+def remote_click(chat_id: int, x: float, y: float):
+    lock = session_locks[chat_id]
+    with lock:
+        session = user_sessions.get(chat_id)
+        if not session or not session.get("browser"):
+            return {"status": "error", "message": "No active session."}
         
-        click_x = int(width * x)
-        click_y = int(height * y)
-        
-        logger.info(f"Remote click request at relative ({x}, {y}) -> absolute ({click_x}, {click_y}) on window size ({width}x{height})")
-        
-        from selenium.webdriver.common.action_chains import ActionChains
-        
-        # Find the element at the viewport coordinates using Javascript elementFromPoint
-        element = driver.execute_script("""
-            return document.elementFromPoint(arguments[0], arguments[1]);
-        """, click_x, click_y)
-        
-        if element:
-            logger.info(f"Found element at coordinates: tag={element.tag_name}, id={element.get_attribute('id')}, class={element.get_attribute('class')}")
-            # Try native ActionChains click (moves mouse to element first to trigger hover, then clicks)
-            try:
-                ActionChains(driver).move_to_element(element).click().perform()
-                logger.info("Successfully executed ActionChains click on element.")
-            except Exception as ac_err:
-                logger.warning(f"ActionChains click failed: {ac_err}. Falling back to JS click.")
-                driver.execute_script("arguments[0].click();", element)
-                driver.execute_script("arguments[0].focus();", element)
-        else:
-            logger.warning("No element found at the clicked coordinates via elementFromPoint.")
-            # Fallback to coordinate-based ActionChains click relative to the html element
-            from selenium.webdriver.common.by import By
-            html_el = driver.find_element(By.TAG_NAME, "html")
-            ActionChains(driver).move_to_element_with_offset(html_el, click_x, click_y).click().perform()
-            logger.info("Executed fallback coordinate-based ActionChains click.")
+        browser = session["browser"]
+        driver = browser.driver
+        try:
+            size = driver.get_window_size()
+            width = size['width']
+            height = size['height']
             
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Remote click failed: {e}")
-        return {"status": "error", "message": str(e)}
+            click_x = int(width * x)
+            click_y = int(height * y)
+            
+            logger.info(f"Remote click request at relative ({x}, {y}) -> absolute ({click_x}, {click_y}) on window size ({width}x{height})")
+            
+            from selenium.webdriver.common.action_chains import ActionChains
+            
+            element = driver.execute_script("""
+                return document.elementFromPoint(arguments[0], arguments[1]);
+            """, click_x, click_y)
+            
+            if element:
+                logger.info(f"Found element at coordinates: tag={element.tag_name}, id={element.get_attribute('id')}, class={element.get_attribute('class')}")
+                try:
+                    ActionChains(driver).move_to_element(element).click().perform()
+                    logger.info("Successfully executed ActionChains click on element.")
+                except Exception as ac_err:
+                    logger.warning(f"ActionChains click failed: {ac_err}. Falling back to JS click.")
+                    driver.execute_script("arguments[0].click();", element)
+                    driver.execute_script("arguments[0].focus();", element)
+            else:
+                logger.warning("No element found at the clicked coordinates via elementFromPoint.")
+                from selenium.webdriver.common.by import By
+                html_el = driver.find_element(By.TAG_NAME, "html")
+                ActionChains(driver).move_to_element_with_offset(html_el, click_x, click_y).click().perform()
+                logger.info("Executed fallback coordinate-based ActionChains click.")
+                
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"Remote click failed: {e}")
+            return {"status": "error", "message": str(e)}
 
 @app.get("/remote/scroll/{chat_id}")
-async def remote_scroll(chat_id: int, dir: str):
-    session = user_sessions.get(chat_id)
-    if not session or not session.get("browser"):
-        return {"status": "error", "message": "No active session."}
-    
-    browser = session["browser"]
-    driver = browser.driver
-    try:
-        amount = 400 if dir == "down" else -400
-        driver.execute_script(f"window.scrollBy(0, {amount});")
-        logger.info(f"Scrolled window by {amount}px")
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Remote scroll failed: {e}")
-        return {"status": "error", "message": str(e)}
+def remote_scroll(chat_id: int, dir: str):
+    lock = session_locks[chat_id]
+    with lock:
+        session = user_sessions.get(chat_id)
+        if not session or not session.get("browser"):
+            return {"status": "error", "message": "No active session."}
+        
+        browser = session["browser"]
+        driver = browser.driver
+        try:
+            amount = 400 if dir == "down" else -400
+            driver.execute_script(f"window.scrollBy(0, {amount});")
+            logger.info(f"Scrolled window by {amount}px")
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"Remote scroll failed: {e}")
+            return {"status": "error", "message": str(e)}
 
 @app.get("/remote/type/{chat_id}")
-async def remote_type(chat_id: int, text: str):
-    session = user_sessions.get(chat_id)
-    if not session or not session.get("browser"):
-        return {"status": "error", "message": "No active session."}
-    
-    browser = session["browser"]
-    driver = browser.driver
-    try:
-        logger.info(f"Remote type text: {text}")
-        active_element = driver.switch_to.active_element
-        active_element.send_keys(text)
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Remote type failed: {e}")
-        return {"status": "error", "message": str(e)}
+def remote_type(chat_id: int, text: str):
+    lock = session_locks[chat_id]
+    with lock:
+        session = user_sessions.get(chat_id)
+        if not session or not session.get("browser"):
+            return {"status": "error", "message": "No active session."}
+        
+        browser = session["browser"]
+        driver = browser.driver
+        try:
+            logger.info(f"Remote type text: {text}")
+            active_element = driver.switch_to.active_element
+            active_element.send_keys(text)
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"Remote type failed: {e}")
+            return {"status": "error", "message": str(e)}
 
 @app.get("/remote/key/{chat_id}")
-async def remote_key(chat_id: int, key: str):
-    session = user_sessions.get(chat_id)
-    if not session or not session.get("browser"):
-        return {"status": "error", "message": "No active session."}
-    
-    browser = session["browser"]
-    driver = browser.driver
-    try:
-        from selenium.webdriver.common.keys import Keys
-        active_element = driver.switch_to.active_element
+def remote_key(chat_id: int, key: str):
+    lock = session_locks[chat_id]
+    with lock:
+        session = user_sessions.get(chat_id)
+        if not session or not session.get("browser"):
+            return {"status": "error", "message": "No active session."}
         
-        key_map = {
-            "backspace": Keys.BACKSPACE,
-            "tab": Keys.TAB,
-            "enter": Keys.ENTER,
-            "escape": Keys.ESCAPE,
-            "up": Keys.ARROW_UP,
-            "down": Keys.ARROW_DOWN,
-            "left": Keys.ARROW_LEFT,
-            "right": Keys.ARROW_RIGHT
-        }
-        
-        selenium_key = key_map.get(key.lower())
-        if selenium_key:
-            logger.info(f"Remote send key: {key}")
-            active_element.send_keys(selenium_key)
-            return {"status": "success"}
-        else:
-            return {"status": "error", "message": f"Unsupported key: {key}"}
-    except Exception as e:
-        logger.error(f"Remote key press failed: {e}")
-        return {"status": "error", "message": str(e)}
+        browser = session["browser"]
+        driver = browser.driver
+        try:
+            from selenium.webdriver.common.keys import Keys
+            active_element = driver.switch_to.active_element
+            
+            key_map = {
+                "backspace": Keys.BACKSPACE,
+                "tab": Keys.TAB,
+                "enter": Keys.ENTER,
+                "escape": Keys.ESCAPE,
+                "up": Keys.ARROW_UP,
+                "down": Keys.ARROW_DOWN,
+                "left": Keys.ARROW_LEFT,
+                "right": Keys.ARROW_RIGHT
+            }
+            
+            selenium_key = key_map.get(key.lower())
+            if selenium_key:
+                logger.info(f"Remote send key: {key}")
+                active_element.send_keys(selenium_key)
+                return {"status": "success"}
+            else:
+                return {"status": "error", "message": f"Unsupported key: {key}"}
+        except Exception as e:
+            logger.error(f"Remote key press failed: {e}")
+            return {"status": "error", "message": str(e)}
