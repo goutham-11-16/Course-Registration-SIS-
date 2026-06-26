@@ -78,7 +78,7 @@ async def log_status_event(chat_id: int, context: ContextTypes.DEFAULT_TYPE, eve
     
     # Action buttons for log screen
     buttons = []
-    if PUBLIC_URL and session["browser"].is_session_alive():
+    if PUBLIC_URL:
         buttons.append([
             InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
         ])
@@ -204,8 +204,8 @@ async def send_dashboard(chat_id: int, context: ContextTypes.DEFAULT_TYPE, query
             InlineKeyboardButton("🚀 Start Monitoring", callback_data="dashboard:toggle_monitor")
         ])
         
-    # Show WebApp remote control button if browser is active and PUBLIC_URL is configured
-    if PUBLIC_URL and session["browser"].is_session_alive():
+    # Show WebApp remote control button if monitoring is active or browser is active
+    if PUBLIC_URL and (monitoring or session["browser"].is_session_alive()):
         buttons.append([
             InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
         ])

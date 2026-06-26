@@ -286,6 +286,14 @@ async def remote_control(chat_id: int):
         const loader = document.getElementById('loader');
         const textInput = document.getElementById('text-input');
 
+        // Auto-refresh screenshot every 3 seconds to keep the live feed updated automatically
+        setInterval(function() {{
+            if (!loader.classList.contains('active')) {{
+                const timestamp = new Date().getTime();
+                screenImg.src = `/remote/screenshot/${{chatId}}?t=${{timestamp}}`;
+            }}
+        }}, 3000);
+
         function showLoader() {{
             loader.classList.add('active');
         }}
