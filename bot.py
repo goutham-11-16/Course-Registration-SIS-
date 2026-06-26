@@ -77,12 +77,15 @@ async def log_status_event(chat_id: int, context: ContextTypes.DEFAULT_TYPE, eve
     )
     
     # Action buttons for log screen
-    buttons = [
-        [
-            InlineKeyboardButton("🛑 Stop Monitoring", callback_data="dashboard:toggle_monitor"),
-            InlineKeyboardButton("◀️ Dashboard Menu", callback_data="dashboard:main")
-        ]
-    ]
+    buttons = []
+    if PUBLIC_URL and session["browser"].is_session_alive():
+        buttons.append([
+            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
+        ])
+    buttons.append([
+        InlineKeyboardButton("🛑 Stop Monitoring", callback_data="dashboard:toggle_monitor"),
+        InlineKeyboardButton("◀️ Dashboard Menu", callback_data="dashboard:main")
+    ])
     
     try:
         await context.bot.edit_message_text(
