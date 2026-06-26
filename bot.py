@@ -15,6 +15,13 @@ from telegram.ext import (
 from browser import RegistrationBrowser
 from config import logger, TELEGRAM_BOT_TOKEN, PORTAL_USERNAME, PORTAL_PASSWORD, PUBLIC_URL
 
+# Clean PUBLIC_URL to ensure it has the correct protocol prefix for Telegram WebAppInfo
+CLEAN_PUBLIC_URL = None
+if PUBLIC_URL:
+    CLEAN_PUBLIC_URL = PUBLIC_URL.strip()
+    if not (CLEAN_PUBLIC_URL.startswith("http://") or CLEAN_PUBLIC_URL.startswith("https://")):
+        CLEAN_PUBLIC_URL = f"https://{CLEAN_PUBLIC_URL}"
+
 # Conversation states for Credentials setup
 AWAITING_USERNAME, AWAITING_PASSWORD = range(2)
 
@@ -78,9 +85,9 @@ async def log_status_event(chat_id: int, context: ContextTypes.DEFAULT_TYPE, eve
     
     # Action buttons for log screen
     buttons = []
-    if PUBLIC_URL:
+    if CLEAN_PUBLIC_URL:
         buttons.append([
-            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
+            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{CLEAN_PUBLIC_URL}/remote/control/{chat_id}"))
         ])
     buttons.append([
         InlineKeyboardButton("🛑 Stop Monitoring", callback_data="dashboard:toggle_monitor"),
@@ -208,9 +215,9 @@ async def send_dashboard(chat_id: int, context: ContextTypes.DEFAULT_TYPE, query
         ])
         
     # Show WebApp remote control button if monitoring is active or browser is active
-    if PUBLIC_URL and (monitoring or session["browser"].is_session_alive()):
+    if CLEAN_PUBLIC_URL and (monitoring or session["browser"].is_session_alive()):
         buttons.append([
-            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
+            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{CLEAN_PUBLIC_URL}/remote/control/{chat_id}"))
         ])
         
     buttons.append([
@@ -488,9 +495,9 @@ async def send_main_menu(chat_id: int, context: ContextTypes.DEFAULT_TYPE, query
         InlineKeyboardButton("❌ Cancel", callback_data="menu:cancel")
     ])
     
-    if PUBLIC_URL:
+    if CLEAN_PUBLIC_URL:
         buttons.append([
-            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{PUBLIC_URL}/remote/control/{chat_id}"))
+            InlineKeyboardButton("🖥️ Open Live Mini App", web_app=WebAppInfo(url=f"{CLEAN_PUBLIC_URL}/remote/control/{chat_id}"))
         ])
         
     markup = InlineKeyboardMarkup(buttons)
