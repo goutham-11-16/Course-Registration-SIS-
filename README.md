@@ -14,6 +14,7 @@ An automated Python Telegram Bot designed to assist KARE (Kalasalingam Academy o
 - 📱 **Mobile-Optimized Interface**: Course names are parsed and listed in the text, and selected using a compact number button grid to prevent button text truncation on mobile screens.
 - 🛡️ **Stealth Automation**: Integrates `selenium-stealth` and eager page load strategies to bypass security verification and speed up navigation.
 - 🛠️ **Two-Step Confirmation**: Injects your selections, loads the confirmation page, sends a screenshot for review, and submits only when you click "Confirm & Submit".
+- 🖥️ **Live Remote Mini App**: Directly control the server-side Selenium browser manually in real-time through a mobile-optimized Web App inside Telegram (features coordinate click mapping, custom text sending, and a virtual keypad).
 
 ---
 
@@ -43,8 +44,9 @@ An automated Python Telegram Bot designed to assist KARE (Kalasalingam Academy o
    ```env
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
    HEADLESS=False
+   PUBLIC_URL=http://localhost:8080
    ```
-   *Note: If you run locally, keeping `HEADLESS=False` lets you see the browser actions in real-time. Change to `True` for background operation.*
+   *Note: If you run locally, keeping `HEADLESS=False` lets you see the browser actions in real-time. Change to `True` for background operation. Set `PUBLIC_URL` to enable local Mini App preview.*
 
 4. **Run the Bot**
    ```bash
@@ -71,6 +73,7 @@ Deploying to **Railway** allows the bot to run 24/7 in the cloud.
    Under the **Variables** tab on Railway, add:
    - `TELEGRAM_BOT_TOKEN` = `your_telegram_bot_token_here`
    - `HEADLESS` = `True`
+   - `PUBLIC_URL` = `https://your-railway-app-name.up.railway.app` *(Optional: Enable Web App remote control)*
 4. **Deploy**: Railway will read the `Dockerfile` automatically, install Python, download Google Chrome, install dependencies, and start the polling loop.
 
 ---
