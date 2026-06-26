@@ -125,7 +125,10 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def start_creds_setup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Triggered via inline button on dashboard to edit/reset credentials."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as e:
+        logger.debug(f"Could not answer callback query: {e}")
     chat_id = update.effective_chat.id
     session = get_or_create_session(chat_id)
     
@@ -225,7 +228,11 @@ async def send_dashboard(chat_id: int, context: ContextTypes.DEFAULT_TYPE, query
     markup = InlineKeyboardMarkup(buttons)
     
     if query:
-        await query.edit_message_text(text=text, reply_markup=markup, parse_mode="Markdown")
+        try:
+            await query.edit_message_text(text=text, reply_markup=markup, parse_mode="Markdown")
+        except Exception as e:
+            if "message is not modified" not in str(e).lower():
+                logger.warning(f"Could not edit dashboard message: {e}")
     elif update_msg:
         await update_msg.reply_text(text=text, reply_markup=markup, parse_mode="Markdown")
     else:
@@ -234,7 +241,10 @@ async def send_dashboard(chat_id: int, context: ContextTypes.DEFAULT_TYPE, query
 async def handle_dashboard_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Routes callback clicks from the dashboard controls."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as e:
+        logger.debug(f"Could not answer callback query: {e}")
     
     chat_id = update.effective_chat.id
     session = get_or_create_session(chat_id)
@@ -527,7 +537,10 @@ async def send_category_options(chat_id: int, context: ContextTypes.DEFAULT_TYPE
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Routes callback queries from inline course selection buttons."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as e:
+        logger.debug(f"Could not answer callback query: {e}")
     
     chat_id = update.effective_chat.id
     session = get_or_create_session(chat_id)
@@ -607,7 +620,10 @@ async def send_users_list(chat_id: int, context: ContextTypes.DEFAULT_TYPE, quer
 async def handle_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles callbacks for inline user directory."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as e:
+        logger.debug(f"Could not answer callback query: {e}")
     
     chat_id = update.effective_chat.id
     data = query.data
